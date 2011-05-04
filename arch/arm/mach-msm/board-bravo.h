@@ -23,8 +23,8 @@
 #define MSM_SMI_BASE		0x02B00000
 #define MSM_SMI_SIZE		0x01500000
 
-#define MSM_PMEM_CAMERA_BASE      0x02B00000
-#define MSM_PMEM_CAMERA_SIZE      0x00800000
+#define MSM_PMEM_VENC_BASE      0x02B00000
+#define MSM_PMEM_VENC_SIZE      0x00800000
 
 #define MSM_RAM_CONSOLE_BASE	0x03A00000
 #define MSM_RAM_CONSOLE_SIZE	0x00040000
@@ -171,6 +171,10 @@
 #define BRAVO_LCD_VSYNC              (136)
 #define BRAVO_LCD_HSYNC              (137)
 #define BRAVO_LCD_DE                 (138)
+
+#define BRAVO_TPS65023_MIN_UV_MV    (800)
+#define BRAVO_TPS65023_MAX_UV_MV    (1350)
+
 
 /* know revision
    0x02 = GSM amoled (dev phone)

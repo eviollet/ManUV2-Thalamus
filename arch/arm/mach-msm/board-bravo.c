@@ -330,11 +330,11 @@ static struct android_pmem_platform_data android_pmem_adsp_pdata = {
 	.cached		= 1,
 };
 
-static struct android_pmem_platform_data android_pmem_camera_pdata = {
-	.name		= "pmem_camera",
-	.start		= MSM_PMEM_CAMERA_BASE,
-	.size		= MSM_PMEM_CAMERA_SIZE,
-	.no_allocator	= 1,
+static struct android_pmem_platform_data android_pmem_venc_pdata = {
+	.name		= "pmem_venc",
+	.start		= MSM_PMEM_VENC_BASE,
+	.size		= MSM_PMEM_VENC_SIZE,
+	.no_allocator	= 0,
 	.cached		= 1,
 };
 
@@ -354,11 +354,11 @@ static struct platform_device android_pmem_adsp_device = {
 	},
 };
 
-static struct platform_device android_pmem_camera_device = {
+static struct platform_device android_pmem_venc_device = {
 	.name		= "android_pmem",
-	.id		= 2,
+	.id		= 3,
 	.dev		= {
-		.platform_data = &android_pmem_camera_pdata,
+		.platform_data = &android_pmem_venc_pdata,
 	},
 };
 
@@ -429,8 +429,8 @@ static struct regulator_init_data tps65023_data[5] = {
 	{
 		.constraints = {
 			.name = "dcdc1", /* VREG_MSMC2_1V29 */
-			.min_uV = 800000,
-			.max_uV = 1300000,
+			.min_uV = BRAVO_TPS65023_MIN_UV_MV * 1000,
+			.max_uV = BRAVO_TPS65023_MAX_UV_MV * 1000,
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
 		},
 		.consumer_supplies = tps65023_dcdc1_supplies,
@@ -627,6 +627,13 @@ static struct msm_camera_device_platform_data msm_camera_device_data = {
 	.ioext.appsz  = MSM_CLK_CTL_SIZE,
 };
 
+static struct camera_flash_cfg msm_camera_sensor_flash_cfg = {
+	.camera_flash		= flashlight_control,
+	.num_flash_levels	= FLASHLIGHT_NUM,
+	.low_temp_limit		= 5,
+	.low_cap_limit		= 15,
+};
+
 static struct msm_camera_sensor_info msm_camera_sensor_s5k3e2fx_data = {
 	.sensor_name 	= "s5k3e2fx",
 	.sensor_reset 	= 144,  /* CAM1_RST */
@@ -635,8 +642,7 @@ static struct msm_camera_sensor_info msm_camera_sensor_s5k3e2fx_data = {
 	.pdata 		= &msm_camera_device_data,
 	.resource 	= msm_camera_resources,
 	.num_resources 	= ARRAY_SIZE(msm_camera_resources),
-	.camera_flash		= flashlight_control,
-	.num_flash_levels	= FLASHLIGHT_NUM,
+	.flash_cfg	= &msm_camera_sensor_flash_cfg,
 };
 
 static struct platform_device msm_camera_sensor_s5k3e2fx = {
@@ -714,7 +720,7 @@ static uint32_t flashlight_gpio_table_rev_CX[] = {
 						GPIO_NO_PULL, GPIO_2MA),
 };
 
-static void config_bravo_flashlight_gpios(void)
+static int config_bravo_flashlight_gpios(void)
 {
 	if (is_cdma_version(system_rev)) {
 		config_gpio_table(flashlight_gpio_table_rev_CX,
@@ -723,7 +729,7 @@ static void config_bravo_flashlight_gpios(void)
 		config_gpio_table(flashlight_gpio_table,
 				ARRAY_SIZE(flashlight_gpio_table));
 	}
-	return;
+	return 0;
 }
 
 static struct flashlight_platform_data bravo_flashlight_data = {
@@ -1046,7 +1052,9 @@ static struct platform_device *devices[] __initdata = {
 	&android_usb_device,
 	&android_pmem_mdp_device,
 	&android_pmem_adsp_device,
-	&android_pmem_camera_device,
+#ifdef CONFIG_720P_CAMERA
+	&android_pmem_venc_device,
+#endif
 	&msm_kgsl_device,
 	&msm_device_i2c,
 	&msm_camera_sensor_s5k3e2fx,
@@ -1177,9 +1185,10 @@ static struct msm_acpu_clock_platform_data bravo_clock_data = {
 	.acpu_switch_time_us	= 20,
 	.max_speed_delta_khz	= 256000,
 	.vdd_switch_time_us	= 62,
-	.power_collapse_khz	= 245760,
-	.wait_for_irq_khz	= 245760,
-	.mpll_khz		= 245760
+/* TODO-ManU : Test 128000 */
+	.power_collapse_khz	= 128000,
+	.wait_for_irq_khz	= 128000,
+	.mpll_khz		= 128000
 };
 
 static struct msm_acpu_clock_platform_data bravo_cdma_clock_data = {

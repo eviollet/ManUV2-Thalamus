@@ -31,7 +31,7 @@
 #define AVS_H
 
 #define VOLTAGE_MIN  900 /* mV */
-#define VOLTAGE_MAX  1300
+#define VOLTAGE_MAX  1350
 #define VOLTAGE_STEP 25
 
 #define AVSDSCR_INPUT 0x01004860 /* magic # from circuit designer */

@@ -28,7 +28,12 @@
 
 #include "acpuclock.h"
 #include "proc_comm.h"
+#ifdef CONFIG_MSM_CPU_AVS
 #include "avs.h"
+#endif // CONFIG_MSM_CPU_AVS
+#ifdef CONFIG_CPU_FREQ_VDD_LEVELS
+#include "board-bravo.h"
+#endif
 
 #if 0
 #define DEBUG(x...) pr_info(x)
@@ -73,23 +78,23 @@ struct clkctl_acpu_speed {
 #define SRC_PLL1	3 /* 768 MHz */
 
 struct clkctl_acpu_speed acpu_freq_tbl[] = {
-        {  19200, CCTL(CLK_TCXO, 1),            SRC_RAW, 0, 0, 975, 14000 },
-//	{  76800, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x02, 0, 900, 58000 },
-        { 128000, CCTL(CLK_TCXO, 1),            SRC_AXI, 0, 0, 975, 14000 },
-//	{ 192000, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x05, 0, 1000, 58000 },
-        { 245760, CCTL(CLK_MODEM_PLL, 1),       SRC_RAW, 0, 0, 1000, 29000 },
+        {  19200, CCTL(CLK_TCXO, 1),            SRC_RAW, 0, 0, 1050, 14000 },
+	{  76800, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x02, 0, 1050, 58000 },
+        { 128000, CCTL(CLK_TCXO, 1),            SRC_AXI, 0, 0, 1050, 14000 },
+//	{ 192000, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x05, 0, 1050, 58000 },
+        { 245760, CCTL(CLK_MODEM_PLL, 1),       SRC_RAW, 0, 0, 1050, 29000 },
         /* Work arround for acpu resume hung, GPLL is turn off by arm9 */
-        /*{ 256000, CCTL(CLK_GLOBAL_PLL, 3),      SRC_RAW, 0, 0, 1000, 29000 },*/
-        { 384000, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0A, 0, 1025, 58000 },
+        /*{ 256000, CCTL(CLK_GLOBAL_PLL, 3),      SRC_RAW, 0, 0, 1050, 29000 },*/
+        { 384000, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0A, 0, 1050, 58000 },
         { 422400, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0B, 0, 1050, 117000 },
         { 460800, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0C, 0, 1050, 117000 },
         { 499200, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0D, 0, 1075, 117000 },
-        { 537600, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0E, 0, 1075, 117000 },
+        { 537600, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0E, 0, 1100, 117000 },
         { 576000, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x0F, 0, 1100, 117000 },
-        { 614400, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x10, 0, 1100, 117000 },
-        { 652800, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x11, 0, 1125, 117000 },
-        { 691200, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x12, 0, 1150, 117000 },
-        { 729600, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x13, 0, 1175, 117000 },
+        { 614400, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x10, 0, 1125, 117000 },
+        { 652800, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x11, 0, 1150, 117000 },
+        { 691200, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x12, 0, 1175, 117000 },
+        { 729600, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x13, 0, 1200, 117000 },
         { 768000, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x14, 0, 1200, 128000 },
         { 806400, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x15, 0, 1225, 128000 },
         { 844800, CCTL(CLK_TCXO, 1),            SRC_SCPLL, 0x16, 0, 1250, 128000 },
@@ -100,6 +105,8 @@ struct clkctl_acpu_speed acpu_freq_tbl[] = {
 	{ 1036800, CCTL(CLK_TCXO, 1),		SRC_SCPLL, 0x1B, 0, 1300, 128000 },
 	{ 1075200, CCTL(CLK_TCXO, 1),		SRC_SCPLL, 0x1C, 0, 1300, 128000 },
 	{ 1113600, CCTL(CLK_TCXO, 1),		SRC_SCPLL, 0x1D, 0, 1300, 128000 },
+	{ 1152000, CCTL(CLK_TCXO, 1), 		SRC_SCPLL, 0x1E, 0, 1300, 128000 }, 
+	{ 1190400, CCTL(CLK_TCXO, 1), 		SRC_SCPLL, 0x1F, 0, 1300, 128000 }, 
 	{ 0 },
 };
 
@@ -120,16 +127,32 @@ static struct cpufreq_frequency_table freq_table[ARRAY_SIZE(acpu_freq_tbl)];
 
 static void __init acpuclk_init_cpufreq_table(void)
 {
-	int allowed_speeds[]={245760,384000,576000,768000,998400,1113600};
-	int i,j;
-
+	int i;
+	int vdd;
 	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) {
 		freq_table[i].index = i;
 		freq_table[i].frequency = CPUFREQ_ENTRY_INVALID;
-		for(j=0;j<ARRAY_SIZE(allowed_speeds);j++)
-			if(acpu_freq_tbl[i].acpu_khz==allowed_speeds[j])
-				freq_table[i].frequency = acpu_freq_tbl[i].acpu_khz;
 
+		/* Define speeds that we want to skip */
+		if (/* acpu_freq_tbl[i].acpu_khz == 256000 || */
+				acpu_freq_tbl[i].acpu_khz == 19200 ||
+				acpu_freq_tbl[i].acpu_khz == 76800 ||
+				//acpu_freq_tbl[i].acpu_khz == 128000 ||
+				//acpu_freq_tbl[i].acpu_khz == 245000 ||
+				acpu_freq_tbl[i].acpu_khz == 256000)
+			continue;
+
+		vdd = acpu_freq_tbl[i].vdd;
+		/* Allow mpll and the first scpll speeds */
+		if (acpu_freq_tbl[i].acpu_khz == acpu_mpll->acpu_khz ||
+				acpu_freq_tbl[i].acpu_khz == 384000) {
+			freq_table[i].frequency = acpu_freq_tbl[i].acpu_khz;
+			continue;
+		}
+
+		/* Add to the table */
+		//if (vdd != acpu_freq_tbl[i + 1].vdd)
+			freq_table[i].frequency = acpu_freq_tbl[i].acpu_khz;
 	}
 
 	freq_table[i].index = i;
@@ -321,6 +344,7 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 		mutex_lock(&drv_state.lock);
 		/* Increase VDD if needed. */
 
+#ifdef CONFIG_MSM_CPU_AVS
 		if(avs_enabled()) {
 			// Notify avs before changing frequency
 			rc = avs_adjust_freq(freq_index, 1);
@@ -329,6 +353,7 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 				goto out;
 			}
 		} else {
+#endif // CONFIG_MSM_CPU_AVS
 			if (next->vdd > cur->vdd) {
 				if (acpuclk_set_vdd_level(next->vdd)) {
 					pr_err("acpuclock: Unable to increase ACPU VDD from %d to %d setting rate to %d.\n", cur->vdd, next->vdd, (int) rate);
@@ -336,7 +361,9 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 					return -EINVAL;
 				}
 			}
+#ifdef CONFIG_MSM_CPU_AVS
 		}
+#endif // CONFIG_MSM_CPU_AVS
 	}
 
 	spin_lock_irqsave(&acpu_lock, flags);
@@ -376,19 +403,23 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 #endif
 out:
 	if (reason == SETRATE_CPUFREQ) {
+#ifdef CONFIG_MSM_CPU_AVS
 		if(avs_enabled()) {
 			/* notify avs after changing frequency */
 			rc = avs_adjust_freq(freq_index, 0);
 			if (rc)
 				pr_warning("Unable to drop ACPU vdd (%d)\n", rc);
 		} else {
+#endif // CONFIG_MSM_CPU_AVS
 			/* Drop VDD level if we can. */
 			if (next->vdd < cur->vdd) {
 				if (acpuclk_set_vdd_level(next->vdd))
 				/*	pr_err("acpuclock: Unable to drop ACPU VDD.\n");*/
 					pr_err("acpuclock: Unable to drop ACPU VDD from %d to %d setting rate to %d.\n", cur->vdd, next->vdd, (int) rate);
 			}
+#ifdef CONFIG_MSM_CPU_AVS
 		}
+#endif // CONFIG_MSM_CPU_AVS
 		mutex_unlock(&drv_state.lock);
 	}
 
@@ -520,6 +551,7 @@ unsigned long acpuclk_wait_for_irq(void)
 	return ret*1000;
 }
 
+#ifdef CONFIG_MSM_CPU_AVS
 static int __init acpu_avs_init(int (*set_vdd) (int), int khz)
 {
         int i;
@@ -538,6 +570,7 @@ static int __init acpu_avs_init(int (*set_vdd) (int), int khz)
 
         return avs_init(set_vdd, freq_count, freq_index, vdd_table, freq_table);
 }
+#endif // CONFIG_MSM_CPU_AVS
 
 void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 {
@@ -560,9 +593,48 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
   clk_set_rate(drv_state.clk_ebi1, drv_state.current_speed->axiclk_khz * 1000);
 #endif
 
+#ifdef CONFIG_MSM_CPU_AVS
 	if (!acpu_avs_init(acpuclk_set_vdd_level,
 		drv_state.current_speed->acpu_khz)) {
 		printk("AVS init successful\n");
 	}
+#endif // CONFIG_MSM_CPU_AVS
 
 }
+
+#ifdef CONFIG_CPU_FREQ_VDD_LEVELS
+ssize_t acpuclk_get_vdd_levels_str(char *buf)
+{
+	int i, len = 0;
+	if (buf)
+	{
+		mutex_lock(&drv_state.lock);
+		for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) 
+		{
+			if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
+				len += sprintf(buf + len, "%8u: %4d\n", acpu_freq_tbl[i].acpu_khz, acpu_freq_tbl[i].vdd);
+		}
+		mutex_unlock(&drv_state.lock);
+	}
+	return len;
+}
+
+void acpuclk_set_vdd(unsigned acpu_khz, int vdd)
+{
+	int i;
+	vdd = vdd / 25 * 25;	//! regulator only accepts multiples of 25 (mV)
+	mutex_lock(&drv_state.lock);
+	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++)
+	{
+		if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
+		{
+			if (acpu_khz == 0)
+				acpu_freq_tbl[i].vdd = min(max((acpu_freq_tbl[i].vdd + vdd), BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+			else if (acpu_freq_tbl[i].acpu_khz == acpu_khz)
+				acpu_freq_tbl[i].vdd = min(max(vdd, BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+		}
+	}
+	mutex_unlock(&drv_state.lock);
+}
+#endif
+
