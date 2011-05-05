@@ -79,3 +79,6 @@ GTAGS
 \#*#
 
 arch/arm/boot/compressed/*
+*.zip
+flash/kernel/zImage
+
