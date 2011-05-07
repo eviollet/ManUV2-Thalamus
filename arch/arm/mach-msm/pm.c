@@ -306,8 +306,8 @@ static int msm_sleep(int sleep_mode, uint32_t sleep_delay, int from_idle)
 		       sleep_mode, sleep_delay, from_idle);
 
 #ifdef CONFIG_MSM_CPU_AVS
-	if(avs_enabled() && !from_idle)
-		avs_set_default_vdds();
+	//	if(avs_enabled() && !from_idle)
+	//	avs_set_default_vdds();
 #endif // CONFIG_MSM_CPU_AVS
 
 #ifndef CONFIG_ARCH_MSM_SCORPION
@@ -450,9 +450,9 @@ static int msm_sleep(int sleep_mode, uint32_t sleep_delay, int from_idle)
 			rv = 0;
 			// after power collapse the avs delays need to be reinitialised
 #ifdef CONFIG_MSM_CPU_AVS
-			if(avs_enabled()) {
-				avs_enable(1);
-			}
+			//if(avs_enabled()) {
+			//	avs_enable(1);
+			//}
 #endif // CONFIG_MSM_CPU_AVS
 		}
 		if (msm_pm_debug_mask & MSM_PM_DEBUG_POWER_COLLAPSE)

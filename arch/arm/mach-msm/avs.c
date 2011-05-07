@@ -1,19 +1,58 @@
 /*
  * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of Code Aurora Forum nor
+ *       the names of its contributors may be used to endorse or promote
+ *       products derived from this software without specific prior written
+ *       permission.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Alternatively, provided that this notice is retained in full, this software
+ * may be relicensed by the recipient under the terms of the GNU General Public
+ * License version 2 ("GPL") and only version 2, in which case the provisions of
+ * the GPL apply INSTEAD OF those given above.  If the recipient relicenses the
+ * software under the GPL, then the identification text in the MODULE_LICENSE
+ * macro must be changed to reflect "GPLv2" instead of "Dual BSD/GPL".  Once a
+ * recipient changes the license terms to the GPL, subsequent recipients shall
+ * not relicense under alternate licensing terms, including the BSD or dual
+ * BSD/GPL terms.  In addition, the following license statement immediately
+ * below and between the words START and END shall also then apply when this
+ * software is relicensed under the GPL:
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
+ * START
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License version 2 and only version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ * END
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <linux/kernel.h>
@@ -25,41 +64,19 @@
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_CPU_FREQ_VDD_LEVELS
+#include "board-bravo.h"
+#endif
+
 #include "avs.h"
 
+#define AVSDSCR_INPUT 0x01004860 /* magic # from circuit designer */
+#define TSCSR_INPUT   0x00000001 /* enable temperature sense */
+
 #define TEMPRS 16                /* total number of temperature regions */
+#define GET_TEMPR() (avs_get_tscsr() >> 28) /* scale TSCSR[CTEMP] to regions */
 
 struct mutex avs_lock;
-
-static int debug=0;
-module_param(debug, int, 00644);
-
-static int enabled=1;
-
-int avs_enabled(void) {
-	return enabled;
-}
-
-static int temp_min=0x50;
-module_param(temp_min, int, 00644);
-
-static int temp_max=0x7f;
-module_param(temp_max, int, 00644);
-
-static int vdd_max=VOLTAGE_MAX;
-module_param(vdd_max, int, 00644);
-
-static int vdd_min=VOLTAGE_MIN;
-module_param(vdd_min, int, 00644);
-
-enum {
-	AVS_UNKNOWN=0,
-	AVS_FOUND=1
-};
-
-// indexes of the modem and lowest scorpion pll frequencies
-#define MPLL_IDX 2
-#define SCPLL_IDX 3
 
 static struct avs_state_s
 {
@@ -72,82 +89,106 @@ static struct avs_state_s
 				 */
 	int (*set_vdd) (int);	/* Function Ptr for setting voltage */
 	int changing;		/* Clock frequency is changing */
-	u32 freq_idx;           /* Current frequency index */
-	int vdd;                /* Current ACPU voltage */
-	int current_tempr;	/* Current Temperature */
-	short *default_vdd;	/* Default Voltages */
-	char *flags;		/* flags for each avs_v */
-	int *freq;		/* Frequencies */
+	u32 freq_idx;		/* Current frequency index */
+	int vdd;		/* Current ACPU voltage */
 } avs_state;
 
+struct clkctl_acpu_speed {
+  unsigned	acpu_khz;
+  int		min_vdd;
+  int		max_vdd;
+};
 
-static int vdd_index;
-module_param(vdd_index,int,00644);
+#ifndef MAX
+#define MAX(A,B)	(A>B?A:B)
+#endif // !ndef MAX
 
-static int vdd_value;
-static int set_vdd(const char *val, struct kernel_param *kp) {
-	int hr,i;
-	hr = param_set_int(val, kp);
-	for(i=0;i<TEMPRS;i++) {
-		avs_state.avs_v[i*avs_state.freq_cnt+vdd_index]=vdd_value;
+struct clkctl_acpu_speed acpu_vdd_tbl[] = {
+  {  19200, VOLTAGE_MIN_START, 975 },
+  { 128000, VOLTAGE_MIN_START, 975 },
+  { 245760, VOLTAGE_MIN_START, 1000 },
+	{ 256000, VOLTAGE_MIN_START, 1000 },
+	{ 384000, VOLTAGE_MIN_START, 1025 },
+ 	{ 422400, VOLTAGE_MIN_START, 1050 },
+	{ 460800, VOLTAGE_MIN_START, 1050 },
+	{ 499200, MAX(VOLTAGE_MIN_START,900), 1075 },
+	{ 537600, MAX(VOLTAGE_MIN_START,900), 1075 },
+	{ 576000, MAX(VOLTAGE_MIN_START,950), 1100 },
+	{ 614400, MAX(VOLTAGE_MIN_START,950), 1100 },
+	{ 652800, MAX(VOLTAGE_MIN_START,950), 1125 },
+	{ 691200, MAX(VOLTAGE_MIN_START,975), 1150 },
+	{ 729600, MAX(VOLTAGE_MIN_START,975), 1175 },
+	{ 768000, MAX(VOLTAGE_MIN_START,975), 1200 },
+	{ 806400, 1175, 1225 },
+	{ 844800, 1200, 1250 },
+	{ 883200, 1200, 1250 },
+	{ 921600, 1225, 1275 },
+	{ 960000, 1225, 1275 },
+	{ 998400, 1225, 1275 },
+#ifdef	USE_OVERCLOCKING
+	{ 1036800, 1225, 1275 },
+	{ 1075200, 1225, 1275 },
+	{ 1113600, 1250, 1325 },
+#endif
+#ifdef	USE_EXTREMEOVERCLOCKING
+	{ 1152000, 1250, 1350 },
+	{ 1190400, 1250, 1350 },
+#endif
+	{ 0 },
+};
+
+#if defined(CONFIG_CPU_FREQ_VDD_LEVELS) && defined(CONFIG_MSM_CPU_AVS)
+ssize_t acpuclk_get_vdd_levels_havs_str(char *buf)
+{
+	int i, len = 0;
+	if (buf)
+	{
+	  for (i = 0; acpu_vdd_tbl[i].acpu_khz; i++) 
+	    {
+	      len += sprintf(buf + len, "%8u: %4d %4d\n", acpu_vdd_tbl[i].acpu_khz, acpu_vdd_tbl[i].min_vdd, acpu_vdd_tbl[i].max_vdd);
+	    }
 	}
-	return 0;
+	return len;
 }
 
-void avs_set_default_vdds(void) {
-	int i,j;
-	for (i = 0; i < TEMPRS; i++)
-		for(j=0;j<avs_state.freq_cnt; j++) {
-			avs_state.avs_v[i*avs_state.freq_cnt+j] = avs_state.default_vdd[j];
-			avs_state.flags[i*avs_state.freq_cnt+j] = AVS_UNKNOWN;
-		}
+void acpuclk_set_vdd_havs(unsigned acpu_khz, int min_vdd, int max_vdd    ) {
+  int i;
+  min_vdd = min_vdd / 25 * 25;	//! regulator only accepts multiples of 25 (mV)
+  max_vdd=max_vdd/25*25;
+
+  mutex_lock(&avs_lock);
+ 
+  for (i = 0; acpu_vdd_tbl[i].acpu_khz; i++) {
+    if (acpu_khz == 0) {
+      acpu_vdd_tbl[i].min_vdd = min(max((acpu_vdd_tbl[i].min_vdd + min_vdd), BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+      acpu_vdd_tbl[i].max_vdd = min(max((acpu_vdd_tbl[i].max_vdd + max_vdd), BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+    } else if (acpu_vdd_tbl[i].acpu_khz == acpu_khz) {
+      acpu_vdd_tbl[i].min_vdd = min(max(min_vdd, BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+      acpu_vdd_tbl[i].max_vdd = min(max(max_vdd, BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+    }
+  }
+
+  /*  for (i = 0; i < TEMPRS*avs_state.freq_cnt; i++) {
+    avs_state.avs_v[i] = VOLTAGE_MAX;
+    }*/
+
+  avs_reset_delays(AVSDSCR_INPUT);
+  avs_set_tscsr(TSCSR_INPUT);
+  //avs_state.changing = 0;
+  //avs_state.freq_idx = -1;
+  //avs_state.vdd = -1;
+  //avs_adjust_freq(freq_idx, 0);
+  
+  mutex_unlock(&avs_lock);
 }
 
-static int get_temp(void) {
+#endif // CONFIG_CPU_FREQ_VDD_LEVELS
 
-	int t=avs_get_tscsr() >> 24;
 
-	if(t<temp_min) {
-		temp_min=t-7;
-		avs_set_default_vdds();
-	}
-	if(t>temp_max) {
-		temp_max=t+7;
-		avs_set_default_vdds();
-	}
-	return ((t-temp_min)*(TEMPRS-1))/(temp_max-temp_min); /* scale TSCSR[CTEMP] to regions */
-}
-
-int get_vdd(char *buffer, struct kernel_param *kp) {
-	int i;
-	int c=0;
-
-	for(i=0;i<TEMPRS;i++) {
-		c+=sprintf(buffer+c,"%d ",avs_state.avs_v[i*avs_state.freq_cnt+vdd_index]);
-	}
-	return c;
-}
-
-module_param_call(vdd, set_vdd, get_vdd, &vdd_value, 00644);
-
-int get_status(char *buffer, struct kernel_param *kp) {
-        int i;
-        int c=0;
-
-	c+=sprintf(buffer+c,"Current TEMPR=%d\nCurrent Index=%d\nCurrent Vdd=%d\nVdd Table:\n",
-		avs_state.current_tempr,avs_state.freq_idx,avs_state.vdd);
-
-        for(i=0;i<avs_state.freq_cnt;i++) {
-                c+=sprintf(buffer+c,"%2d:%7d %d\n",i,avs_state.freq[i],avs_state.avs_v[avs_state.current_tempr*avs_state.freq_cnt+i]);
-        }
-        return c;
-}
-module_param_call(status, NULL, get_status, NULL, 00644);
 /*
  *  Update the AVS voltage vs frequency table, for current temperature
  *  Adjust based on the AVS delay circuit hardware status
  */
-
 static void avs_update_voltage_table(short *vdd_table)
 {
 	u32 avscsr;
@@ -161,12 +202,9 @@ static void avs_update_voltage_table(short *vdd_table)
 	cur_freq_idx = avs_state.freq_idx;
 	cur_voltage = avs_state.vdd;
 
-	// don't update the MPLL based entry
-	if(cur_freq_idx==MPLL_IDX)
-		return;
-
 	avscsr = avs_test_delays();
-	AVSDEBUG("avscsr=%x, avsdscr=%x avstscsr=%x\n", avscsr, avs_get_avsdscr(), avs_get_tscsr());
+	AVSDEBUG("vdd_table=0x%X\n", (unsigned int)vdd_table);
+	AVSDEBUG("avscsr=%x, avsdscr=%x, cur_voltage=%d\n", avscsr, avs_get_avsdscr(), cur_voltage);
 
 	/*
 	 * Read the results for the various unit's AVS delay circuits
@@ -175,6 +213,7 @@ static void avs_update_voltage_table(short *vdd_table)
 	cpu = ((avscsr >> 23) & 2) + ((avscsr >> 16) & 1);
 	vu  = ((avscsr >> 28) & 2) + ((avscsr >> 21) & 1);
 	l2  = ((avscsr >> 29) & 2) + ((avscsr >> 22) & 1);
+	AVSDEBUG("cpu=%d, vu=%d, l2=%d\n", cpu, vu, l2);
 
 	if ((cpu == 3) || (vu == 3) || (l2 == 3)) {
 		printk(KERN_ERR "AVS: Dly Synth O/P error\n");
@@ -187,43 +226,32 @@ static void avs_update_voltage_table(short *vdd_table)
 		AVSDEBUG("cpu=%d l2=%d vu=%d\n", cpu, l2, vu);
 		AVSDEBUG("Voltage up at %d\n", cur_freq_idx);
 
-		if (cur_voltage >= vdd_max)
+		if (cur_voltage >= VOLTAGE_MAX || cur_voltage >= acpu_vdd_tbl[cur_freq_idx].max_vdd)
 			printk(KERN_ERR
 				"AVS: Voltage can not get high enough!\n");
 
 		/* Raise the voltage for all frequencies */
 		for (i = 0; i < avs_state.freq_cnt; i++) {
-			vdd_table[i] += VOLTAGE_STEP;
-			if (vdd_table[i] > vdd_max)
-				vdd_table[i] = vdd_max;
+			vdd_table[i] = cur_voltage + VOLTAGE_STEP;
+			if (vdd_table[i] > VOLTAGE_MAX)
+				vdd_table[i] = VOLTAGE_MAX;
+			else if (vdd_table[i] > acpu_vdd_tbl[i].max_vdd)
+				vdd_table[i] = acpu_vdd_tbl[i].max_vdd;
 		}
+	} else if ((cpu == 1) && (l2 == 1) && (vu == 1)) {
+	  AVSDEBUG("cur_voltage=%d, min_vdd=%d, vdd_table=%d\n", cur_voltage, acpu_vdd_tbl[cur_freq_idx].min_vdd, vdd_table[cur_freq_idx]);
+		if ((cur_voltage - VOLTAGE_STEP >= VOLTAGE_MIN) &&
+		    (cur_voltage - VOLTAGE_STEP >= acpu_vdd_tbl[cur_freq_idx].min_vdd) &&
+		    (cur_voltage <= vdd_table[cur_freq_idx])) {
+			vdd_table[cur_freq_idx] = cur_voltage - VOLTAGE_STEP;
+			AVSDEBUG("Voltage down for %d and lower levels\n",
+				cur_freq_idx);
 
-	} else {
-		// if a good voltaage has been found just return
-		if(avs_state.flags[avs_state.current_tempr*avs_state.freq_cnt+cur_freq_idx]==AVS_FOUND)
-			return;
-		// if all oscillators ask for down
-		if ((cpu == 1) && (l2 == 1) && (vu == 1)) {
-			if ((cur_voltage - VOLTAGE_STEP >= vdd_min) &&
-			    (cur_voltage <= vdd_table[cur_freq_idx])) {
-				vdd_table[cur_freq_idx] = cur_voltage - VOLTAGE_STEP;
-				AVSDEBUG("Voltage down for %d and lower levels\n",
-					cur_freq_idx);
-				/* clamp to this voltage for all lower levels */
-				for (i = 0; i < cur_freq_idx; i++) {
-					if (vdd_table[i] > vdd_table[cur_freq_idx])
-						vdd_table[i] = vdd_table[cur_freq_idx];
-				}
+			/* clamp to this voltage for all lower levels */
+			for (i = 0; i < cur_freq_idx; i++) {
+				if (vdd_table[i] > vdd_table[cur_freq_idx])
+					vdd_table[i] = vdd_table[cur_freq_idx];
 			}
-		} else if ((cpu == 0) || (l2 == 0)) { // vu is not very reliable so only use cpu and l2 to see if a good voltage is found
-			// increase the voltage slightly and mark as found
-			avs_state.flags[avs_state.current_tempr*avs_state.freq_cnt+cur_freq_idx]=AVS_FOUND;
-			vdd_table[cur_freq_idx] += VOLTAGE_STEP;
-			if (vdd_table[cur_freq_idx] > avs_state.default_vdd[cur_freq_idx])
-				vdd_table[cur_freq_idx] = avs_state.default_vdd[cur_freq_idx];
-			if(cur_freq_idx==SCPLL_IDX) // use the lowest SCPLL frequency for the MPLL frequency
-				 vdd_table[MPLL_IDX]=vdd_table[cur_freq_idx];
-			AVSDEBUG("Fix Voltage to %d for %d\n",vdd_table[cur_freq_idx],cur_freq_idx); 
 		}
 	}
 }
@@ -234,19 +262,26 @@ static void avs_update_voltage_table(short *vdd_table)
  */
 static short avs_get_target_voltage(int freq_idx, bool update_table)
 {
-	unsigned cur_tempr = get_temp();
-	unsigned temp_index = cur_tempr*avs_state.freq_cnt;
+	unsigned	cur_tempr = GET_TEMPR();
+	unsigned	temp_index = cur_tempr*avs_state.freq_cnt;
+	short		*vdd_table;
 
 	/* Table of voltages vs frequencies for this temp */
-	short *vdd_table = avs_state.avs_v + temp_index;
+	vdd_table = avs_state.avs_v + temp_index;
 
-	if(avs_state.current_tempr!=cur_tempr) { // only print tempr if it changes.
-		avs_state.current_tempr=cur_tempr;
-		AVSDEBUG("TEMPR=%d\n",cur_tempr);
+	AVSDEBUG("vdd_table[%d]=%d\n", freq_idx, vdd_table[freq_idx]);
+	if ((update_table) || (vdd_table[freq_idx]==VOLTAGE_MAX)) {
+	  avs_update_voltage_table(vdd_table);
 	}
 
-	if (update_table)
-		avs_update_voltage_table(vdd_table);
+	if (vdd_table[freq_idx] > acpu_vdd_tbl[freq_idx].max_vdd) {
+		pr_info("%dmV too high for %d.\n", vdd_table[freq_idx], acpu_vdd_tbl[freq_idx].acpu_khz);
+		vdd_table[freq_idx] = acpu_vdd_tbl[freq_idx].max_vdd;
+	}
+	if (vdd_table[freq_idx] < acpu_vdd_tbl[freq_idx].min_vdd) {
+		pr_info("%dmV too low for %d.\n", vdd_table[freq_idx], acpu_vdd_tbl[freq_idx].acpu_khz);
+		vdd_table[freq_idx] = acpu_vdd_tbl[freq_idx].min_vdd;
+	}
 
 	return vdd_table[freq_idx];
 }
@@ -258,16 +293,26 @@ static short avs_get_target_voltage(int freq_idx, bool update_table)
  */
 static int avs_set_target_voltage(int freq_idx, bool update_table)
 {
-	int rc = 0;
-	int retries=10;
+	int ctr = 5, rc = 0, new_voltage;
 
-	int new_voltage = avs_get_target_voltage(freq_idx, update_table);
+	if (freq_idx < 0 || freq_idx >= avs_state.freq_cnt) {
+		AVSDEBUG("Out of range :%d\n", freq_idx);
+		return -EINVAL;
+	}
+
+	new_voltage = avs_get_target_voltage(freq_idx, update_table);
 	if (avs_state.vdd != new_voltage) {
-		do {
-			AVSDEBUG("AVS setting V to %d mV @%d\n",
-				new_voltage, freq_idx);
+	  /*AVSDEBUG*/
+	  pr_info("AVS setting V to %d mV @%d MHz\n", new_voltage, acpu_vdd_tbl[freq_idx].acpu_khz / 1000);
+		rc = avs_state.set_vdd(new_voltage);
+		while (rc && ctr) {
 			rc = avs_state.set_vdd(new_voltage);
-		} while(rc && retries--);
+			ctr--;
+			if (rc) {
+				printk(KERN_ERR "avs_set_target_voltage: Unable to set V to %d mV (attempt: %d)\n", new_voltage, 5 - ctr);
+				mdelay(1);
+			}
+		}
 		if (rc)
 			return rc;
 		avs_state.vdd = new_voltage;
@@ -287,8 +332,8 @@ int avs_adjust_freq(u32 freq_idx, int begin)
 		return 0;
 	}
 
-	if (freq_idx >= avs_state.freq_cnt) {
- 		AVSDEBUG("Out of range :%d\n", freq_idx);
+	if (freq_idx < 0 || freq_idx >= avs_state.freq_cnt) {
+		AVSDEBUG("Out of range :%d\n", freq_idx);
 		return -EINVAL;
 	}
 
@@ -314,7 +359,7 @@ aaf_out:
 
 static struct delayed_work avs_work;
 static struct workqueue_struct  *kavs_wq;
-#define AVS_DELAY msecs_to_jiffies(50)
+#define AVS_DELAY ((CONFIG_HZ * 50 + 999) / 1000)
 
 static void do_avs_timer(struct work_struct *work)
 {
@@ -331,18 +376,18 @@ static void do_avs_timer(struct work_struct *work)
 }
 
 
-static void  avs_timer_init(void)
+static void __init avs_timer_init(void)
 {
 	INIT_DELAYED_WORK_DEFERRABLE(&avs_work, do_avs_timer);
 	queue_delayed_work_on(0, kavs_wq, &avs_work, AVS_DELAY);
 }
 
-static void  avs_timer_exit(void)
+static void __exit avs_timer_exit(void)
 {
 	cancel_delayed_work(&avs_work);
 }
 
-static int  avs_work_init(void)
+static int __init avs_work_init(void)
 {
 	kavs_wq = create_workqueue("avs");
 	if (!kavs_wq) {
@@ -354,44 +399,15 @@ static int  avs_work_init(void)
 	return 1;
 }
 
-static void  avs_work_exit(void)
+static void __exit avs_work_exit(void)
 {
 	avs_timer_exit();
 	destroy_workqueue(kavs_wq);
-	kavs_wq=0;
 }
 
-extern int acpuclk_get_index(void);
-
-void avs_enable(int i) {
-	if(i) {
-		avs_reset_delays(AVSDSCR_INPUT);
-        	avs_set_tscsr(TSCSR_INPUT);
-		if(!kavs_wq) {
-			avs_adjust_freq(acpuclk_get_index(), 0);
-			avs_work_init();
-		}
-	} else {
-		avs_disable();
-		avs_work_exit();
-	}
-}
-
-
-static int set_avs(const char *val, struct kernel_param *kp)
+int __init avs_init(int (*set_vdd)(int), u32 freq_cnt, u32 freq_idx)
 {
-	int hr;
-	hr = param_set_int(val, kp);
-	printk("AVS Enable(%d)\n",enabled);
-	avs_enable(enabled);
-	return 0;
-}
-
-module_param_call(enabled, set_avs, param_get_int, &enabled, 00644);
-
-int avs_init(int (*set_vdd)(int), u32 freq_cnt, u32 freq_idx, short *vdd_table, int *freq_table)
-{
-	int j;
+	int i;
 
 	mutex_init(&avs_lock);
 
@@ -406,37 +422,30 @@ int avs_init(int (*set_vdd)(int), u32 freq_cnt, u32 freq_idx, short *vdd_table, 
 	avs_state.avs_v = kmalloc(TEMPRS * avs_state.freq_cnt *
 		sizeof(avs_state.avs_v[0]), GFP_KERNEL);
 
-	avs_state.default_vdd =  kmalloc(avs_state.freq_cnt * sizeof(avs_state.default_vdd[0]), GFP_KERNEL);
-	avs_state.flags =  kmalloc(TEMPRS * avs_state.freq_cnt * sizeof(avs_state.flags[0]), GFP_KERNEL);
-	avs_state.freq =  kmalloc(avs_state.freq_cnt * sizeof(avs_state.freq[0]), GFP_KERNEL);
-
-	for(j=0;j<avs_state.freq_cnt; j++) {
-		avs_state.default_vdd[j]=vdd_table[j];
-		avs_state.freq[j]=freq_table[j];
-	}
-
 	if (avs_state.avs_v == 0)
 		return -ENOMEM;
 
-	avs_set_default_vdds();
+	for (i = 0; i < TEMPRS*avs_state.freq_cnt; i++)
+		avs_state.avs_v[i] = VOLTAGE_MAX;
+
+	avs_reset_delays(AVSDSCR_INPUT);
+	avs_set_tscsr(TSCSR_INPUT);
 
 	avs_state.set_vdd = set_vdd;
 	avs_state.changing = 0;
 	avs_state.freq_idx = -1;
 	avs_state.vdd = -1;
-	avs_state.current_tempr = 0;
+	avs_adjust_freq(freq_idx, 0);
 
-	if(enabled)
-		avs_enable(enabled);
+	avs_work_init();
 
 	return 0;
 }
 
-void  avs_exit(void)
+void __exit avs_exit()
 {
 	avs_work_exit();
 
 	kfree(avs_state.avs_v);
 }
-
 

@@ -650,7 +650,7 @@ static ssize_t show_scaling_setspeed(struct cpufreq_policy *policy, char *buf)
 
 #ifdef CONFIG_CPU_FREQ_VDD_LEVELS
 #ifdef CONFIG_MSM_CPU_AVS
-/*extern ssize_t acpuclk_get_vdd_levels_havs_str(char *buf);
+extern ssize_t acpuclk_get_vdd_levels_havs_str(char *buf);
 static ssize_t show_vdd_levels_havs(struct cpufreq_policy *policy, char *buf)
 {
 	return acpuclk_get_vdd_levels_havs_str(buf);
@@ -715,7 +715,7 @@ static ssize_t store_vdd_levels_havs(struct cpufreq_policy *policy, const char *
   }
 
   return count;
-}*/
+}
 #else
 extern ssize_t acpuclk_get_vdd_levels_str(char *buf);
 static ssize_t show_vdd_levels(struct cpufreq_policy *policy, char *buf)
@@ -815,7 +815,7 @@ cpufreq_freq_attr_rw(scaling_governor);
 cpufreq_freq_attr_rw(scaling_setspeed);
 #ifdef CONFIG_CPU_FREQ_VDD_LEVELS
 #ifdef CONFIG_MSM_CPU_AVS
-/*cpufreq_freq_attr_rw(vdd_levels_havs);*/
+cpufreq_freq_attr_rw(vdd_levels_havs);
 #else
 cpufreq_freq_attr_rw(vdd_levels);
 #endif // AVS
@@ -835,7 +835,7 @@ static struct attribute *default_attrs[] = {
 	&scaling_setspeed.attr,
 #ifdef CONFIG_CPU_FREQ_VDD_LEVELS
 #ifdef CONFIG_MSM_CPU_AVS
-/*	&vdd_levels_havs.attr,*/
+	&vdd_levels_havs.attr,
 #else
 	&vdd_levels.attr,
 #endif // AVS

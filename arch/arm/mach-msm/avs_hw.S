@@ -62,6 +62,8 @@ avs_test_delays:
 		bx lr
 
 
+
+
 	.global avs_get_avscsr
 /*      Read r0=AVSCSR to get status from CPU, VFP, and L2 ring oscillators */
 
@@ -100,31 +102,17 @@ avs_set_tscsr:
 	.global avs_reset_delays
 avs_reset_delays:
 
+/*      AVSCSR(0x61) to enable CPU, V and L2 AVS module  */
+		mov r3, #0x61
+		mcr p15, 7, r3, c15, c1, 7
+
 /*      AVSDSCR(dly) to program delay */
 		mcr p15, 7, r0, c15, c0, 6
 
 /*      Read r0=AVSDSCR */
 		mrc p15, 7, r0, c15, c0, 6
 
-/*      AVSCSR(0x61) to enable CPU, V and L2 AVS module  */
-		mov r3, #0x61
-		mcr p15, 7, r3, c15, c1, 7
-
-		bx lr
-
-
-
-        .global avs_disable
-avs_disable:
-
-/*      Clear AVSCSR */
-		mov r0, #0
-
-/*      Write AVSCSR */
-		mcr p15, 7, r0, c15, c1, 7
-
-		bx lr
+	bx lr
 
 	.end
-
 

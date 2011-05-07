@@ -27,10 +27,8 @@
 #include <mach/msm_iomap.h>
 
 #include "acpuclock.h"
-#include "proc_comm.h"
-#ifdef CONFIG_MSM_CPU_AVS
 #include "avs.h"
-#endif // CONFIG_MSM_CPU_AVS
+#include "proc_comm.h"
 #ifdef CONFIG_CPU_FREQ_VDD_LEVELS
 #include "board-bravo.h"
 #endif
@@ -121,9 +119,10 @@ struct clkctl_acpu_speed *acpu_stby = &acpu_freq_tbl[2];
 
 struct clkctl_acpu_speed *acpu_mpll = &acpu_freq_tbl[2];
 
+
+
 #ifdef CONFIG_CPU_FREQ_TABLE
 static struct cpufreq_frequency_table freq_table[ARRAY_SIZE(acpu_freq_tbl)];
-
 
 static void __init acpuclk_init_cpufreq_table(void)
 {
@@ -174,6 +173,7 @@ struct clock_state {
 	unsigned long			wait_for_irq_khz;
   struct clk*     clk_ebi1;
 	struct regulator                *regulator;
+	int (*acpu_set_vdd) (int mvolts);
 };
 
 static struct clock_state drv_state = { 0 };
@@ -192,6 +192,43 @@ static DEFINE_SPINLOCK(acpu_lock);
 #define PLLMODE_STEP_CAL	6
 #define PLLMODE_NORMAL		7
 #define PLLMODE_MASK		7
+
+#if defined(CONFIG_CPU_FREQ_VDD_LEVELS) && !defined(CONFIG_MSM_CPU_AVS)
+ssize_t acpuclk_get_vdd_levels_str(char *buf)
+{
+	int i, len = 0;
+	if (buf)
+	{
+	  mutex_lock(&drv_state.lock);
+	  for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) 
+	    {
+	      if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
+		len += sprintf(buf + len, "%8u: %4d\n", acpu_freq_tbl[i].acpu_khz, acpu_freq_tbl[i].vdd);
+	    }
+	  mutex_unlock(&drv_state.lock);
+	}
+	return len;
+}
+
+void acpuclk_set_vdd(unsigned acpu_khz, int vdd)
+{
+	int i;
+	vdd = vdd / 25 * 25;	//! regulator only accepts multiples of 25 (mV)
+	mutex_lock(&drv_state.lock);
+	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++)
+	{
+		if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
+		{
+			if (acpu_khz == 0)
+				acpu_freq_tbl[i].vdd = min(max((acpu_freq_tbl[i].vdd + vdd), BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+			else if (acpu_freq_tbl[i].acpu_khz == acpu_khz)
+				acpu_freq_tbl[i].vdd = min(max(vdd, BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
+		}
+	}
+	mutex_unlock(&drv_state.lock);
+}
+
+#endif // CONFIG_CPU_FREQ_VDD_LEVELS
 
 static void scpll_power_down(void)
 {
@@ -221,6 +258,8 @@ static void scpll_set_freq(uint32_t lval)
 
 	if (lval > 33)
 		lval = 33;
+	//if (lval < 10)
+	//	lval = 10;
 	if (lval < 2)
 		lval = 2;
 
@@ -345,15 +384,16 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 		/* Increase VDD if needed. */
 
 #ifdef CONFIG_MSM_CPU_AVS
-		if(avs_enabled()) {
+		//if(avs_enabled()) {
 			// Notify avs before changing frequency
 			rc = avs_adjust_freq(freq_index, 1);
 			if (rc) {
 				pr_err("Unable to increase ACPU vdd (%d)\n", rc);
 				goto out;
 			}
-		} else {
-#endif // CONFIG_MSM_CPU_AVS
+			//} else {
+			//#endif // CONFIG_MSM_CPU_AVS
+#else
 			if (next->vdd > cur->vdd) {
 				if (acpuclk_set_vdd_level(next->vdd)) {
 					pr_err("acpuclock: Unable to increase ACPU VDD from %d to %d setting rate to %d.\n", cur->vdd, next->vdd, (int) rate);
@@ -361,8 +401,8 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 					return -EINVAL;
 				}
 			}
-#ifdef CONFIG_MSM_CPU_AVS
-		}
+			//#ifdef CONFIG_MSM_CPU_AVS
+			  //}
 #endif // CONFIG_MSM_CPU_AVS
 	}
 
@@ -404,21 +444,22 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 out:
 	if (reason == SETRATE_CPUFREQ) {
 #ifdef CONFIG_MSM_CPU_AVS
-		if(avs_enabled()) {
+	  //if(avs_enabled()) {
 			/* notify avs after changing frequency */
 			rc = avs_adjust_freq(freq_index, 0);
 			if (rc)
 				pr_warning("Unable to drop ACPU vdd (%d)\n", rc);
-		} else {
-#endif // CONFIG_MSM_CPU_AVS
+			//	} else {
+			//#endif // CONFIG_MSM_CPU_AVS
+#else
 			/* Drop VDD level if we can. */
 			if (next->vdd < cur->vdd) {
 				if (acpuclk_set_vdd_level(next->vdd))
 				/*	pr_err("acpuclock: Unable to drop ACPU VDD.\n");*/
 					pr_err("acpuclock: Unable to drop ACPU VDD from %d to %d setting rate to %d.\n", cur->vdd, next->vdd, (int) rate);
 			}
-#ifdef CONFIG_MSM_CPU_AVS
-		}
+			//#ifdef CONFIG_MSM_CPU_AVS
+			  //}
 #endif // CONFIG_MSM_CPU_AVS
 		mutex_unlock(&drv_state.lock);
 	}
@@ -552,21 +593,17 @@ unsigned long acpuclk_wait_for_irq(void)
 #ifdef CONFIG_MSM_CPU_AVS
 static int __init acpu_avs_init(int (*set_vdd) (int), int khz)
 {
-        int i;
-        int freq_count = 0;
-        int freq_index = -1;
-	short vdd_table[ARRAY_SIZE(acpu_freq_tbl)];
-	int freq_table[ARRAY_SIZE(acpu_freq_tbl)];
+	int i;
+	int freq_count = 0;
+	int freq_index = -1;
 
-        for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) {
-		vdd_table[i]=acpu_freq_tbl[i].vdd;
-		freq_table[i]=acpu_freq_tbl[i].acpu_khz;
-                freq_count++;
-                if (acpu_freq_tbl[i].acpu_khz == khz)
-                        freq_index = i;
-        }
+	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) {
+		freq_count++;
+		if (acpu_freq_tbl[i].acpu_khz == khz)
+			freq_index = i;
+	}
 
-        return avs_init(set_vdd, freq_count, freq_index, vdd_table, freq_table);
+	return avs_init(set_vdd, freq_count, freq_index);
 }
 #endif // CONFIG_MSM_CPU_AVS
 
