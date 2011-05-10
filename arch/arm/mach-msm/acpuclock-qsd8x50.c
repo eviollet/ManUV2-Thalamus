@@ -120,19 +120,36 @@ struct clkctl_acpu_speed *acpu_stby = &acpu_freq_tbl[2];
 
 struct clkctl_acpu_speed *acpu_mpll = &acpu_freq_tbl[2];
 
-
-
 #ifdef CONFIG_CPU_FREQ_TABLE
 static struct cpufreq_frequency_table freq_table[ARRAY_SIZE(acpu_freq_tbl)];
 
+
 static void __init acpuclk_init_cpufreq_table(void)
 {
+  int allowed_speeds[]={128000,245760,384000,576000,768000,998400,1113600};
+	int i,j;
+
+	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) {
+		freq_table[i].index = i;
+		freq_table[i].frequency = CPUFREQ_ENTRY_INVALID;
+		for(j=0;j<ARRAY_SIZE(allowed_speeds);j++)
+			if(acpu_freq_tbl[i].acpu_khz==allowed_speeds[j])
+				freq_table[i].frequency = acpu_freq_tbl[i].acpu_khz;
+
+	}
+
+	freq_table[i].index = i;
+	freq_table[i].frequency = CPUFREQ_TABLE_END;
+
+	cpufreq_frequency_table_get_attr(freq_table, smp_processor_id());
+
+	/*
 	int i;
 	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) {
 		freq_table[i].index = i;
 		freq_table[i].frequency = CPUFREQ_ENTRY_INVALID;
 
-		/* Define speeds that we want to skip */
+		// Define speeds that we want to skip
 		if (acpu_freq_tbl[i].ignore==1) {
 		  continue;
 		}
@@ -144,6 +161,7 @@ static void __init acpuclk_init_cpufreq_table(void)
 	freq_table[i].frequency = CPUFREQ_TABLE_END;
 
 	cpufreq_frequency_table_get_attr(freq_table, smp_processor_id());
+*/
 }
 #else
 #define acpuclk_init_cpufreq_table() do {} while (0);
@@ -244,8 +262,6 @@ static void scpll_set_freq(uint32_t lval)
 
 	if (lval > 33)
 		lval = 33;
-	//if (lval < 10)
-	//	lval = 10;
 	if (lval < 2)
 		lval = 2;
 
@@ -622,40 +638,4 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 #endif // CONFIG_MSM_CPU_AVS
 
 }
-
-#ifdef CONFIG_CPU_FREQ_VDD_LEVELS
-ssize_t acpuclk_get_vdd_levels_str(char *buf)
-{
-	int i, len = 0;
-	if (buf)
-	{
-		mutex_lock(&drv_state.lock);
-		for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) 
-		{
-			if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
-				len += sprintf(buf + len, "%8u: %4d\n", acpu_freq_tbl[i].acpu_khz, acpu_freq_tbl[i].vdd);
-		}
-		mutex_unlock(&drv_state.lock);
-	}
-	return len;
-}
-
-void acpuclk_set_vdd(unsigned acpu_khz, int vdd)
-{
-	int i;
-	vdd = vdd / 25 * 25;	//! regulator only accepts multiples of 25 (mV)
-	mutex_lock(&drv_state.lock);
-	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++)
-	{
-		if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
-		{
-			if (acpu_khz == 0)
-				acpu_freq_tbl[i].vdd = min(max((acpu_freq_tbl[i].vdd + vdd), BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
-			else if (acpu_freq_tbl[i].acpu_khz == acpu_khz)
-				acpu_freq_tbl[i].vdd = min(max(vdd, BRAVO_TPS65023_MIN_UV_MV), BRAVO_TPS65023_MAX_UV_MV);
-		}
-	}
-	mutex_unlock(&drv_state.lock);
-}
-#endif
 
